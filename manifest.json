@@ -1,0 +1,37 @@
+{
+    "display_information": {
+        "name": "Slack-Trivia"
+    },
+    "features": {
+        "bot_user": {
+            "display_name": "Slack-Trivia",
+            "always_online": false
+        },
+        "slash_commands": [
+            {
+                "command": "/trivia",
+                "url": "https://jumf2222.ddns.net:25565/slack/events",
+                "description": "Test trivia command",
+                "should_escape": false
+            }
+        ]
+    },
+    "oauth_config": {
+        "scopes": {
+            "bot": [
+                "chat:write",
+                "commands"
+            ]
+        }
+    },
+    "settings": {
+        "interactivity": {
+            "is_enabled": true,
+            "request_url": "https://jumf2222.ddns.net:25565/slack/events",
+            "message_menu_options_url": "https://jumf2222.ddns.net:25565/slack/events"
+        },
+        "org_deploy_enabled": false,
+        "socket_mode_enabled": false,
+        "token_rotation_enabled": false
+    }
+}

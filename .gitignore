@@ -1,3 +1,8 @@
+db
+docker-compose.yml
+ssl
+build
+
 # Logs
 logs
 *.log
