@@ -195,5 +195,5 @@ app.view('create_question', async ({ ack, body }) => {
         key: process.env.TLS_PRIVATE_KEY ? fs.readFileSync(process.env.TLS_PRIVATE_KEY) : undefined,
         cert: process.env.TLS_CERT ? fs.readFileSync(process.env.TLS_CERT) : undefined
     });
-    console.log(`Flow Trivia is running on port ${process.env.PORT || 3000}!`);
+    console.log(`Slack Trivia is running on port ${process.env.PORT || 3000}!`);
 })();
