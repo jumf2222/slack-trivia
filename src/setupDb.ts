@@ -34,9 +34,11 @@ export const setupDb = async (connection: Connection) => {
 
     await connection.query(`CREATE TABLE IF NOT EXISTS question (
         id INT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+        owner VARCHAR(11) NOT NULL,
         scoreboard INT NOT NULL,
         question INT NOT NULL,
-        reveal BOOLEAN NOT NULL,
+        message VARCHAR(255) NOT NULL,
+        reveal BOOLEAN NOT NULL DEFAULT false,
         created_date TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
     )`);
 

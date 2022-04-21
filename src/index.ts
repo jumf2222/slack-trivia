@@ -1,4 +1,4 @@
-import { App, BlockAction, ExpressReceiver, ExternalSelectAction, Option } from "@slack/bolt";
+import { App, BlockAction, ButtonAction, CheckboxesAction, ExpressReceiver, ExternalSelectAction, Option } from "@slack/bolt";
 import dotenv from "dotenv";
 import fs from "fs";
 import mysql from "mysql2";
@@ -6,6 +6,7 @@ import { answerQuestionModal } from "./modals/answer-question";
 import { createQuestionModal } from "./modals/create-question";
 import { endMessage } from "./modals/end-message";
 import { helpModal } from "./modals/help";
+import { questionMessage } from "./modals/question-message";
 import { scoreboardModal } from "./modals/scoreboard";
 import { setupDb } from "./setupDb";
 
@@ -22,7 +23,6 @@ const receiver = new ExpressReceiver({ signingSecret: process.env.SLACK_SIGNING_
 const app = new App({ token: process.env.SLACK_BOT_TOKEN, receiver });
 
 receiver.router.get("/services/ping", (req, res) => {
-    console.log("HERE");
     res.status(200).json({ status: "ok" });
 });
 
@@ -68,24 +68,17 @@ app.command('/trivia', async ({ command, ack, client, body, respond, say }) => {
 
                 await client.views.open({
                     trigger_id: body.trigger_id,
-                    view: createQuestionModal("subcategory_select")
+                    view: {
+                        ...createQuestionModal("subcategory_select"),
+                        private_metadata: JSON.stringify({ channel: command.channel_id, scoreboard: scoreboardId })
+                    }
                 });
 
-                // await client.views.open({
-                //     trigger_id: body.trigger_id,
-                //     view: answerQuestionModal()
-                // });
                 break;
             } case "scoreboard": {
                 await client.views.open({
                     trigger_id: body.trigger_id,
                     view: scoreboardModal()
-                });
-                break;
-            } case "answer": {
-                await client.views.open({
-                    trigger_id: body.trigger_id,
-                    view: answerQuestionModal(true)
                 });
                 break;
             }
@@ -101,7 +94,7 @@ app.command('/trivia', async ({ command, ack, client, body, respond, say }) => {
                 }
 
                 await connection.execute("update scoreboard set end_date = CURRENT_TIMESTAMP where id = ?", [data[0].id]);
-                await say(endMessage());
+                await say({ blocks: endMessage() });
                 break;
             }
             default:
@@ -116,11 +109,12 @@ app.command('/trivia', async ({ command, ack, client, body, respond, say }) => {
 
 app.action<BlockAction<ExternalSelectAction>>("category_select", async ({ ack, client, body, respond, say }) => {
     await ack();
-    let viewTemplate = undefined;
+    let viewTemplate: any = undefined;
+    let data = JSON.parse(body.view!.private_metadata);
 
-    if (JSON.parse(body.view!.private_metadata || "{}").category_select !== body.actions[0].selected_option!.value) {
-        viewTemplate = JSON.parse(JSON.stringify(createQuestionModal("subcategory_select" + Math.random())));
-        viewTemplate.private_metadata = JSON.stringify({ category_select: body.actions[0].selected_option!.value });
+    if (data.category_select !== body.actions[0].selected_option!.value) {
+        viewTemplate = { ...createQuestionModal("subcategory_select" + Math.random()) };
+        viewTemplate.private_metadata = JSON.stringify({ ...data, category_select: body.actions[0].selected_option!.value });
     }
 
     await client.views.update({
@@ -160,7 +154,7 @@ app.action<BlockAction<ExternalSelectAction>>("subcategory_select", async ({ ack
 });
 
 app.options("subcategory_select", async ({ ack, client, body }) => {
-    let data = (await connection.execute("select * from subcategory where category = ?", [Number(JSON.parse(body.view!.private_metadata || "{}").category_select)]))[0] as mysql.RowDataPacket[];
+    let data = (await connection.execute("select * from subcategory where category = ?", [Number(JSON.parse(body.view!.private_metadata).category_select)]))[0] as mysql.RowDataPacket[];
 
     await ack({
         options: [
@@ -184,10 +178,134 @@ app.options("subcategory_select", async ({ ack, client, body }) => {
     });
 });
 
-app.view('create_question', async ({ ack, body }) => {
-    console.log(body);
+app.view('create_question', async ({ ack, body, client }) => {
+    let metadata = JSON.parse(body.view!.private_metadata);
+    let category = Number(flatten(body.view.state.values).category_select.selected_option.value);
+    let subcategory = Number(flatten(body.view.state.values).subcategory_select.selected_option.value);
+
+    if (category === -1) {
+        category = ((await connection.execute("select id from category order by RAND() limit 1", []))[0] as mysql.RowDataPacket[])[0].id;
+    }
+
+    if (subcategory === -1) {
+        subcategory = ((await connection.execute("select id from subcategory where category = ? order by RAND() limit 1", [category]))[0] as mysql.RowDataPacket[])[0].id;
+    }
+
+    let question = ((await connection.execute("select * from question_pool where subcategory = ? order by RAND() limit 1", [subcategory]))[0] as mysql.RowDataPacket[])[0];
+    let message = await client.chat.postMessage({ channel: metadata.channel, blocks: questionMessage(question.question) });
+
+    (await connection.execute("insert into question (owner, scoreboard, question, message) values (?, ?, ?, ?)", [body.user.id, metadata.scoreboard, question.id, message.ts]))[0] as mysql.RowDataPacket[];
+
     await ack({ response_action: "clear" });
 });
+
+app.action<BlockAction<ButtonAction>>("answer_question", async ({ ack, client, body, respond, say }) => {
+    await ack();
+    let question = ((await connection.execute("select p.*, q.owner, q.id as question_id, q.message, q.reveal from question_pool p, question q, scoreboard s where q.message = ? and s.channel = ? and q.scoreboard = s.id and p.id = q.question", [body.message!.ts, body.channel!.id]))[0] as mysql.RowDataPacket[])[0];
+    let answer = ((await connection.execute("select answer from answer where question = ? and owner = ?", [question.question_id, body.user.id]))[0] as mysql.RowDataPacket[])[0];
+
+    await client.views.open({
+        trigger_id: body.trigger_id,
+        view: {
+            ...answerQuestionModal(
+                question.question,
+                ((question.reveal && answer && answer.answer == 0) ? (answer.answer === question.answer ? "✓ " : "✗ ") : "") + question.option0,
+                ((question.reveal && answer && answer.answer == 1) ? (answer.answer === question.answer ? "✓ " : "✗ ") : "") + question.option1,
+                ((question.reveal && answer && answer.answer == 2) ? (answer.answer === question.answer ? "✓ " : "✗ ") : "") + question.option2,
+                ((question.reveal && answer && answer.answer == 3) ? (answer.answer === question.answer ? "✓ " : "✗ ") : "") + question.option3,
+                question.owner === body.user.id,
+                question.reveal,
+                answer !== undefined,
+                (answer && question.reveal) ? (question.answer === 0 ? "primary" : "danger") : (answer && answer.answer === 0 ? "primary" : undefined),
+                (answer && question.reveal) ? (question.answer === 1 ? "primary" : "danger") : (answer && answer.answer === 1 ? "primary" : undefined),
+                (answer && question.reveal) ? (question.answer === 2 ? "primary" : "danger") : (answer && answer.answer === 2 ? "primary" : undefined),
+                (answer && question.reveal) ? (question.answer === 3 ? "primary" : "danger") : (answer && answer.answer === 3 ? "primary" : undefined),
+            ),
+            private_metadata: JSON.stringify({ question: question.question_id, selectedOption: -1, answer: answer ? answer.answer : -1 })
+        }
+    });
+});
+
+app.action<BlockAction<CheckboxesAction>>("reveal", async ({ ack, client, body, respond, say }) => {
+    await ack();
+    let metadata = JSON.parse(body.view!.private_metadata);
+    let question = ((await connection.execute("update question set reveal = ? where id = ?", [body.actions[0].selected_options.length > 0, metadata.question]))[0] as mysql.RowDataPacket[])[0];
+});
+
+app.action<BlockAction<ButtonAction>>(/select_option\d*/, async ({ ack, client, body, respond, say }) => {
+    await ack();
+
+    let metadata = JSON.parse(body.view!.private_metadata);
+    if (metadata.answer !== -1) return;
+
+    let question = ((await connection.execute("select p.*, q.owner, q.message, q.reveal from question_pool p, question q where q.id = ? and p.id = q.question", [metadata.question]))[0] as mysql.RowDataPacket[])[0];
+
+    metadata.selectedOption = Number(body.actions[0].value);
+
+    await client.views.update({
+        view_id: body.view?.id,
+        hash: body.view?.hash,
+        view: {
+            ...answerQuestionModal(
+                question.question,
+                ((question.reveal && metadata.answer == 0) ? (metadata.answer === question.answer ? "✓ " : "✗ ") : "") + question.option0,
+                ((question.reveal && metadata.answer == 1) ? (metadata.answer === question.answer ? "✓ " : "✗ ") : "") + question.option1,
+                ((question.reveal && metadata.answer == 2) ? (metadata.answer === question.answer ? "✓ " : "✗ ") : "") + question.option2,
+                ((question.reveal && metadata.answer == 3) ? (metadata.answer === question.answer ? "✓ " : "✗ ") : "") + question.option3,
+                question.owner === body.user.id,
+                question.reveal,
+                metadata.answer !== -1,
+                (metadata.answer !== -1 && question.reveal) ? (question.answer === 0 ? "primary" : "danger") : (metadata.selectedOption === 0 ? "primary" : undefined),
+                (metadata.answer !== -1 && question.reveal) ? (question.answer === 1 ? "primary" : "danger") : (metadata.selectedOption === 1 ? "primary" : undefined),
+                (metadata.answer !== -1 && question.reveal) ? (question.answer === 2 ? "primary" : "danger") : (metadata.selectedOption === 2 ? "primary" : undefined),
+                (metadata.answer !== -1 && question.reveal) ? (question.answer === 3 ? "primary" : "danger") : (metadata.selectedOption === 3 ? "primary" : undefined),
+            ),
+            private_metadata: JSON.stringify(metadata)
+        }
+    });
+});
+
+app.view('answer_question', async ({ ack, body, client }) => {
+    let metadata = JSON.parse(body.view!.private_metadata);
+
+    if (metadata.selectedOption === -1) return;
+
+    let answer = ((await connection.execute("insert into answer (owner, question, answer) select ?, ?, ? where not exists (select * from answer where owner = ? and question = ? LIMIT 1)", [
+        body.user.id,
+        metadata.question,
+        metadata.selectedOption,
+        body.user.id,
+        metadata.question,
+    ]))[0] as mysql.RowDataPacket[])[0];
+
+    let question = ((await connection.execute("select p.*, q.owner, q.message, q.reveal from question_pool p, question q where q.id = ? and p.id = q.question", [metadata.question]))[0] as mysql.RowDataPacket[])[0];
+
+    if (!question.reveal) return await ack();
+
+    metadata.answer = metadata.selectedOption;
+
+    await ack({
+        response_action: "update",
+        view: {
+            ...answerQuestionModal(
+                question.question,
+                ((question.reveal && metadata.answer == 0) ? (metadata.answer === question.answer ? "✓ " : "✗ ") : "") + question.option0,
+                ((question.reveal && metadata.answer == 1) ? (metadata.answer === question.answer ? "✓ " : "✗ ") : "") + question.option1,
+                ((question.reveal && metadata.answer == 2) ? (metadata.answer === question.answer ? "✓ " : "✗ ") : "") + question.option2,
+                ((question.reveal && metadata.answer == 3) ? (metadata.answer === question.answer ? "✓ " : "✗ ") : "") + question.option3,
+                question.owner === body.user.id,
+                question.reveal,
+                metadata.answer !== -1,
+                (metadata.answer !== -1 && question.reveal) ? (question.answer === 0 ? "primary" : "danger") : (metadata.selectedOption === 0 ? "primary" : undefined),
+                (metadata.answer !== -1 && question.reveal) ? (question.answer === 1 ? "primary" : "danger") : (metadata.selectedOption === 1 ? "primary" : undefined),
+                (metadata.answer !== -1 && question.reveal) ? (question.answer === 2 ? "primary" : "danger") : (metadata.selectedOption === 2 ? "primary" : undefined),
+                (metadata.answer !== -1 && question.reveal) ? (question.answer === 3 ? "primary" : "danger") : (metadata.selectedOption === 3 ? "primary" : undefined),
+            ),
+            private_metadata: JSON.stringify(metadata)
+        }
+    });
+});
+
 
 (async () => {
     await setupDb(connection);

@@ -1,21 +1,41 @@
 import { Block, KnownBlock, ModalView } from "@slack/bolt";
 
-export const answerQuestionModal = (isCreator: boolean): ModalView => {
+export const answerQuestionModal = (
+    question: string,
+    option0: string,
+    option1: string,
+    option2: string,
+    option3: string,
+    isCreator: boolean,
+    reveal: boolean,
+    answered: boolean,
+    option0_style?: "danger" | "primary",
+    option1_style?: "danger" | "primary",
+    option2_style?: "danger" | "primary",
+    option3_style?: "danger" | "primary"
+): ModalView => {
+
     return {
         type: "modal",
+        callback_id: "answer_question",
         title: {
             type: "plain_text",
             text: "Answer Trivia Question",
             emoji: true
         },
-        submit: {
-            type: "plain_text",
-            text: "Answer",
-            emoji: true
-        },
+        ...(
+            answered ? {} :
+                {
+                    submit: {
+                        type: "plain_text",
+                        text: "Answer",
+                        emoji: true
+                    },
+                }
+        ),
         close: {
             type: "plain_text",
-            text: "Cancel",
+            text: answered ? "Close" : "Cancel",
             emoji: true
         },
         blocks: [
@@ -23,7 +43,7 @@ export const answerQuestionModal = (isCreator: boolean): ModalView => {
                 type: "section",
                 text: {
                     type: "mrkdwn",
-                    text: "What art movement is Andy Warhol most closely associated with?"
+                    text: question
                 }
             },
             {
@@ -40,37 +60,45 @@ export const answerQuestionModal = (isCreator: boolean): ModalView => {
                         type: "button",
                         text: {
                             type: "plain_text",
-                            text: "Realism",
-                            emoji: true
+                            text: option0,
+                            emoji: true,
                         },
-                        value: "click_me_123"
+                        action_id: "select_option0",
+                        value: "0",
+                        style: option0_style,
                     },
                     {
                         type: "button",
                         text: {
                             type: "plain_text",
-                            text: "Pop Art",
+                            text: option1,
                             emoji: true
                         },
-                        value: "click_me_123"
+                        action_id: "select_option1",
+                        value: "1",
+                        style: option1_style,
                     },
                     {
                         type: "button",
                         text: {
                             type: "plain_text",
-                            text: "Expressionism",
+                            text: option2,
                             emoji: true
                         },
-                        value: "click_me_123"
+                        action_id: "select_option2",
+                        value: "2",
+                        style: option2_style,
                     },
                     {
                         type: "button",
                         text: {
                             type: "plain_text",
-                            text: "Surrealism",
+                            text: option3,
                             emoji: true
                         },
-                        value: "click_me_123"
+                        action_id: "select_option3",
+                        value: "3",
+                        style: option3_style,
                     }
                 ]
             },
@@ -86,18 +114,28 @@ export const answerQuestionModal = (isCreator: boolean): ModalView => {
                             text: "*Reveal answer*"
                         },
                         accessory: {
-                            type: "radio_buttons",
+                            type: "checkboxes",
                             options: [
                                 {
                                     text: {
                                         type: "plain_text",
                                         text: "Correct answer will be shown immediately after answering",
                                         emoji: true
-                                    },
-                                    value: "value-0"
+                                    }
                                 }
                             ],
-                            action_id: "radio_buttons-action"
+                            ...(reveal ? {
+                                initial_options: [
+                                    {
+                                        text: {
+                                            type: "plain_text",
+                                            text: "Correct answer will be shown immediately after answering",
+                                            emoji: true
+                                        }
+                                    }
+                                ]
+                            } : {}),
+                            action_id: "reveal"
                         }
                     }
                 ] as (Block | KnownBlock)[]
