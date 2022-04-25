@@ -1,6 +1,8 @@
 import { Connection } from "mysql2/promise";
 
 export const setupDb = async (connection: Connection) => {
+    console.log("Setting up database...");
+
     await connection.query(`CREATE TABLE IF NOT EXISTS category (
         id INT NOT NULL AUTO_INCREMENT PRIMARY KEY,
         name VARCHAR(255) NOT NULL
@@ -49,4 +51,6 @@ export const setupDb = async (connection: Connection) => {
         answer INT NOT NULL,
         created_date TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
     )`);
+
+    console.log("Setup database");
 };

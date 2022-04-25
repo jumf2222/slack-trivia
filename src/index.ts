@@ -2,13 +2,16 @@ import { App, BlockAction, ButtonAction, CheckboxesAction, ExpressReceiver, Exte
 import dotenv from "dotenv";
 import fs from "fs";
 import mysql from "mysql2";
+import { endMessage } from "./messages/end-message";
+import { questionMessage } from "./messages/question-message";
 import { answerQuestionModal } from "./modals/answer-question";
 import { createQuestionModal } from "./modals/create-question";
-import { endMessage } from "./modals/end-message";
 import { helpModal } from "./modals/help";
-import { questionMessage } from "./modals/question-message";
 import { scoreboardModal } from "./modals/scoreboard";
+import { loadQuestions } from "./questions";
 import { setupDb } from "./setupDb";
+
+const MEDALS = ["🥇", "🥈", "🥉"];
 
 dotenv.config();
 
@@ -76,9 +79,33 @@ app.command('/trivia', async ({ command, ack, client, body, respond, say }) => {
 
                 break;
             } case "scoreboard": {
+                let data = (await connection.execute("select * from scoreboard where channel = ? and end_date IS NULL", [command.channel_id]))[0] as mysql.RowDataPacket[];
+
+                if (data.length === 0) {
+                    return await respond(`There is no active scoreboard.`);
+                }
+
+                let placements = (await connection.execute(`
+                with scores as
+                (select rank () over (order by sum(case when a.answer = p.answer then 1 else 0 end) desc) ranking,
+                a.owner,
+                sum(case when a.answer = p.answer then 1 else 0 end) as score
+                from question q, question_pool p, answer a
+                where q.question = p.id and a.question = q.id and q.scoreboard = ?
+                group by a.owner
+                order by ranking)
+                select ranking, owner, score from scores where owner = ?
+                union all
+                select ranking, owner, score from scores limit 10`, [data[0].id, body.user_id]))[0] as mysql.RowDataPacket[];
+
                 await client.views.open({
                     trigger_id: body.trigger_id,
-                    view: scoreboardModal()
+                    view: scoreboardModal(placements
+                        .slice((placements.length > 0 && placements[0].owner === body.user_id) ? 1 : 0)
+                        .map((placement) => `${placement.ranking}. <@${placement.owner}> | ${placement.score} Points`),
+                        (placements.length > 0 && placements[0].owner === body.user_id && placements[0].ranking > 10) ?
+                            `${placements[0].ranking}. <@${placements[0].owner}> | ${placements[0].score} Points` : ""
+                    )
                 });
                 break;
             }
@@ -89,12 +116,24 @@ app.command('/trivia', async ({ command, ack, client, body, respond, say }) => {
                     return await respond(`There is no active scoreboard.`);
                 }
 
-                if (command.user_id !== data[0].owner) {
-                    return await respond(`You do not have permission to end the scoreboard.`);
-                }
+                // if (command.user_id !== data[0].owner) {
+                //     return await respond(`You do not have permission to end the scoreboard.`);
+                // }
 
                 await connection.execute("update scoreboard set end_date = CURRENT_TIMESTAMP where id = ?", [data[0].id]);
-                await say({ blocks: endMessage() });
+
+                let placements = (await connection.execute(`
+                with scores as
+                (select rank () over (order by sum(case when a.answer = p.answer then 1 else 0 end) desc) ranking,
+                a.owner,
+                sum(case when a.answer = p.answer then 1 else 0 end) as score
+                from question q, question_pool p, answer a
+                where q.question = p.id and a.question = q.id and q.scoreboard = ?
+                group by a.owner
+                order by ranking)
+                select ranking, owner, score from scores where ranking <= 3`, [data[0].id]))[0] as mysql.RowDataPacket[];
+
+                await say({ blocks: endMessage(placements.map((placement) => `${MEDALS[placement.ranking - 1]}. <@${placement.owner}> | ${placement.score} Points`)) });
                 break;
             }
             default:
@@ -171,7 +210,7 @@ app.options("subcategory_select", async ({ ack, client, body }) => {
                         type: "plain_text",
                         text: subcategory.name
                     },
-                    value: subcategory.name
+                    value: subcategory.id.toString()
                 } as Option;
             })
         ]
@@ -192,7 +231,7 @@ app.view('create_question', async ({ ack, body, client }) => {
     }
 
     let question = ((await connection.execute("select * from question_pool where subcategory = ? order by RAND() limit 1", [subcategory]))[0] as mysql.RowDataPacket[])[0];
-    let message = await client.chat.postMessage({ channel: metadata.channel, blocks: questionMessage(question.question) });
+    let message = await client.chat.postMessage({ channel: metadata.channel, blocks: questionMessage(question.question), text: "A new question has been created." });
 
     (await connection.execute("insert into question (owner, scoreboard, question, message) values (?, ?, ?, ?)", [body.user.id, metadata.scoreboard, question.id, message.ts]))[0] as mysql.RowDataPacket[];
 
@@ -201,7 +240,7 @@ app.view('create_question', async ({ ack, body, client }) => {
 
 app.action<BlockAction<ButtonAction>>("answer_question", async ({ ack, client, body, respond, say }) => {
     await ack();
-    let question = ((await connection.execute("select p.*, q.owner, q.id as question_id, q.message, q.reveal from question_pool p, question q, scoreboard s where q.message = ? and s.channel = ? and q.scoreboard = s.id and p.id = q.question", [body.message!.ts, body.channel!.id]))[0] as mysql.RowDataPacket[])[0];
+    let question = ((await connection.execute("select p.*, q.owner, q.id as question_id, q.message, q.reveal, p.answer_description from question_pool p, question q, scoreboard s where q.message = ? and s.channel = ? and q.scoreboard = s.id and p.id = q.question", [body.message!.ts, body.channel!.id]))[0] as mysql.RowDataPacket[])[0];
     let answer = ((await connection.execute("select answer from answer where question = ? and owner = ?", [question.question_id, body.user.id]))[0] as mysql.RowDataPacket[])[0];
 
     await client.views.open({
@@ -216,6 +255,7 @@ app.action<BlockAction<ButtonAction>>("answer_question", async ({ ack, client, b
                 question.owner === body.user.id,
                 question.reveal,
                 answer !== undefined,
+                (answer && question.reveal) ? question.answer_description : "",
                 (answer && question.reveal) ? (question.answer === 0 ? "primary" : "danger") : (answer && answer.answer === 0 ? "primary" : undefined),
                 (answer && question.reveal) ? (question.answer === 1 ? "primary" : "danger") : (answer && answer.answer === 1 ? "primary" : undefined),
                 (answer && question.reveal) ? (question.answer === 2 ? "primary" : "danger") : (answer && answer.answer === 2 ? "primary" : undefined),
@@ -238,7 +278,7 @@ app.action<BlockAction<ButtonAction>>(/select_option\d*/, async ({ ack, client, 
     let metadata = JSON.parse(body.view!.private_metadata);
     if (metadata.answer !== -1) return;
 
-    let question = ((await connection.execute("select p.*, q.owner, q.message, q.reveal from question_pool p, question q where q.id = ? and p.id = q.question", [metadata.question]))[0] as mysql.RowDataPacket[])[0];
+    let question = ((await connection.execute("select p.*, q.owner, q.message, q.reveal, p.answer_description from question_pool p, question q where q.id = ? and p.id = q.question", [metadata.question]))[0] as mysql.RowDataPacket[])[0];
 
     metadata.selectedOption = Number(body.actions[0].value);
 
@@ -255,6 +295,7 @@ app.action<BlockAction<ButtonAction>>(/select_option\d*/, async ({ ack, client, 
                 question.owner === body.user.id,
                 question.reveal,
                 metadata.answer !== -1,
+                (metadata.answer !== -1 && question.reveal) ? question.answer_description : "",
                 (metadata.answer !== -1 && question.reveal) ? (question.answer === 0 ? "primary" : "danger") : (metadata.selectedOption === 0 ? "primary" : undefined),
                 (metadata.answer !== -1 && question.reveal) ? (question.answer === 1 ? "primary" : "danger") : (metadata.selectedOption === 1 ? "primary" : undefined),
                 (metadata.answer !== -1 && question.reveal) ? (question.answer === 2 ? "primary" : "danger") : (metadata.selectedOption === 2 ? "primary" : undefined),
@@ -278,7 +319,7 @@ app.view('answer_question', async ({ ack, body, client }) => {
         metadata.question,
     ]))[0] as mysql.RowDataPacket[])[0];
 
-    let question = ((await connection.execute("select p.*, q.owner, q.message, q.reveal from question_pool p, question q where q.id = ? and p.id = q.question", [metadata.question]))[0] as mysql.RowDataPacket[])[0];
+    let question = ((await connection.execute("select p.*, q.owner, q.message, q.reveal, p.answer_description from question_pool p, question q where q.id = ? and p.id = q.question", [metadata.question]))[0] as mysql.RowDataPacket[])[0];
 
     if (!question.reveal) return await ack();
 
@@ -296,6 +337,7 @@ app.view('answer_question', async ({ ack, body, client }) => {
                 question.owner === body.user.id,
                 question.reveal,
                 metadata.answer !== -1,
+                (metadata.answer !== -1 && question.reveal) ? question.answer_description : "",
                 (metadata.answer !== -1 && question.reveal) ? (question.answer === 0 ? "primary" : "danger") : (metadata.selectedOption === 0 ? "primary" : undefined),
                 (metadata.answer !== -1 && question.reveal) ? (question.answer === 1 ? "primary" : "danger") : (metadata.selectedOption === 1 ? "primary" : undefined),
                 (metadata.answer !== -1 && question.reveal) ? (question.answer === 2 ? "primary" : "danger") : (metadata.selectedOption === 2 ? "primary" : undefined),
@@ -309,6 +351,7 @@ app.view('answer_question', async ({ ack, body, client }) => {
 
 (async () => {
     await setupDb(connection);
+    await loadQuestions(connection);
     await app.start(process.env.PORT || 3000, {
         key: process.env.TLS_PRIVATE_KEY ? fs.readFileSync(process.env.TLS_PRIVATE_KEY) : undefined,
         cert: process.env.TLS_CERT ? fs.readFileSync(process.env.TLS_CERT) : undefined

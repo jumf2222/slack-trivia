@@ -1,6 +1,6 @@
-import { ModalView } from "@slack/bolt";
+import { Block, KnownBlock, ModalView } from "@slack/bolt";
 
-export const scoreboardModal = (): ModalView => {
+export const scoreboardModal = (top10: string[], placement: string): ModalView => {
     return {
         type: "modal",
         title: {
@@ -21,37 +21,27 @@ export const scoreboardModal = (): ModalView => {
                     text: "*Top 10*"
                 }
             },
-            {
-                type: "section",
-                text: {
-                    type: "mrkdwn",
-                    text: "1. Brian Latchman | 500 Points"
+            ...top10.map((placement) => {
+                return {
+                    type: "section",
+                    text: {
+                        type: "mrkdwn",
+                        text: placement
+                    }
+                };
+            }),
+            ...(!placement ? [] : [
+                {
+                    type: "divider"
+                },
+                {
+                    type: "section",
+                    text: {
+                        type: "mrkdwn",
+                        text: placement
+                    }
                 }
-            },
-            {
-                type: "section",
-                text: {
-                    type: "mrkdwn",
-                    text: "2. Tomasz Cieslak | 400 Points"
-                }
-            },
-            {
-                type: "section",
-                text: {
-                    type: "mrkdwn",
-                    text: "3. Julian de Rushe | 300 Points"
-                }
-            },
-            {
-                type: "divider"
-            },
-            {
-                type: "section",
-                text: {
-                    type: "mrkdwn",
-                    text: "27. You | 0 Points"
-                }
-            }
+            ] as (Block | KnownBlock)[]),
         ]
     };
 };

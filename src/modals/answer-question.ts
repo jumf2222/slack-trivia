@@ -9,10 +9,11 @@ export const answerQuestionModal = (
     isCreator: boolean,
     reveal: boolean,
     answered: boolean,
+    description: string,
     option0_style?: "danger" | "primary",
     option1_style?: "danger" | "primary",
     option2_style?: "danger" | "primary",
-    option3_style?: "danger" | "primary"
+    option3_style?: "danger" | "primary",
 ): ModalView => {
 
     return {
@@ -102,6 +103,14 @@ export const answerQuestionModal = (
                     }
                 ]
             },
+            ...(!description ? [] : [
+                {
+                    type: "section",
+                    text: {
+                        type: "mrkdwn",
+                        text: description
+                    }
+                }] as (Block | KnownBlock)[]),
             ...(!isCreator ? [] :
                 [
                     {

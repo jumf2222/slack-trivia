@@ -1,4 +1,6 @@
-[
+import { Connection, ResultSetHeader } from "mysql2/promise";
+
+export const QUESTIONS = [
     {
         "category": "Art Trivia",
         "subCategory": "Andy Warhol Trivia",
@@ -40312,4 +40314,74 @@
         "answerIndex": 2,
         "answerDescription": "The Tripartite Pact united Japan, Italy and Germany to formalize the Axis Powers. The Tripartite Pact stipulated that any country, with the exception of the Soviet Union, not in the war which attacked any Axis Power would be forced to go to war against all three."
     }
-]
+];
+
+export const loadQuestions = async (connection: Connection) => {
+    console.log("Loading Questions...");
+
+    let categoryMapping: any = {};
+    let subCategoryMapping: any = {};
+    let increment = 1; // Start at increment 1
+    let categoryQuery = "INSERT IGNORE INTO category (id, name) VALUES ?";
+    let subcategoryQuery = "INSERT IGNORE INTO subcategory (id, category, name) VALUES ?";
+    let questionPoolQuery = "INSERT IGNORE INTO question_pool (id, subcategory, question, option0, option1, option2, option3, answer, answer_description) VALUES ?";
+
+    let result = (await connection.query(
+        categoryQuery,
+        [
+            QUESTIONS.map((question: any) => {
+                let id;
+                if (categoryMapping[question.category]) {
+                    id = categoryMapping[question.category];
+                } else {
+                    categoryMapping[question.category] = increment;
+                    id = increment;
+                    increment += 1;
+                }
+                return [id, question.category];
+            }),
+        ],
+    ))[0] as ResultSetHeader;
+
+    // Reset increment
+    increment = 1;
+
+    result = (await connection.query(
+        subcategoryQuery,
+        [
+            QUESTIONS.map((question: any) => {
+                let id;
+                if (subCategoryMapping[question.subCategory]) {
+                    id = subCategoryMapping[question.subCategory];
+                } else {
+                    subCategoryMapping[question.subCategory] = increment;
+                    id = increment;
+                    increment += 1;
+                }
+                return [id, categoryMapping[question.category], question.subCategory];
+            })
+        ]
+    ))[0] as ResultSetHeader;
+
+    // Reset increment
+    increment = 1;
+
+    result = (await connection.query(
+        questionPoolQuery,
+        [
+            QUESTIONS.map((question: any) => {
+                // Ignore id, let it auto_increment
+                return [
+                    increment++,
+                    subCategoryMapping[question.subCategory],
+                    question.question,
+                    ...question.options,
+                    question.answerIndex,
+                    question.answerDescription,
+                ];
+            })
+        ]
+    ))[0] as ResultSetHeader;
+
+    console.log(`Loaded ${QUESTIONS.length} Questions`);
+};

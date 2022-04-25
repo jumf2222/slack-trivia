@@ -11,7 +11,7 @@
             {
                 "command": "/trivia",
                 "url": "https://jumf2222.ddns.net:25565/slack/events",
-                "description": "Test trivia command",
+                "description": "Slack trivia",
                 "should_escape": false
             }
         ]
