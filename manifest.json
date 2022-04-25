@@ -10,7 +10,7 @@
         "slash_commands": [
             {
                 "command": "/trivia",
-                "url": "https://jumf2222.ddns.net:25565/slack/events",
+                "url": "YOUR_URL/slack/events",
                 "description": "Slack trivia",
                 "should_escape": false
             }
@@ -27,8 +27,8 @@
     "settings": {
         "interactivity": {
             "is_enabled": true,
-            "request_url": "https://jumf2222.ddns.net:25565/slack/events",
-            "message_menu_options_url": "https://jumf2222.ddns.net:25565/slack/events"
+            "request_url": "YOUR_URL/slack/events",
+            "message_menu_options_url": "YOUR_URL/slack/events"
         },
         "org_deploy_enabled": false,
         "socket_mode_enabled": false,
