@@ -352,9 +352,9 @@ app.view('answer_question', async ({ ack, body, client }) => {
 (async () => {
     await setupDb(connection);
     await loadQuestions(connection);
-    await app.start(process.env.PORT || 3000, {
-        key: process.env.TLS_PRIVATE_KEY ? fs.readFileSync(process.env.TLS_PRIVATE_KEY) : undefined,
-        cert: process.env.TLS_CERT ? fs.readFileSync(process.env.TLS_CERT) : undefined
-    });
+    await app.start(process.env.PORT || 3000, (process.env.TLS_PRIVATE_KEY && process.env.TLS_CERT) ? {
+        key: fs.readFileSync(process.env.TLS_PRIVATE_KEY),
+        cert: fs.readFileSync(process.env.TLS_CERT!)
+    } : undefined);
     console.log(`Slack Trivia is running on port ${process.env.PORT || 3000}!`);
 })();
