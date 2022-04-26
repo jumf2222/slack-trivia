@@ -30,7 +30,7 @@ export const setupDb = async (connection: Connection) => {
         id INT NOT NULL AUTO_INCREMENT PRIMARY KEY,
         owner VARCHAR(11) NOT NULL,
         channel VARCHAR(11) NOT NULL,
-        end_date TIMESTAMP,
+        end_date TIMESTAMP DEFAULT NULL,
         created_date TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
     )`);
 
